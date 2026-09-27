@@ -6,8 +6,12 @@
   ],
   "routes": [
     { "src": "/api/(.*)", "dest": "server.js" },
-    { "src": "/chat", "dest": "public/chat.html" },
+    { "src": "/sw.js", "dest": "public/sw.js" },
+    { "src": "/manifest.json", "dest": "public/manifest.json" },
+    { "src": "/sign-up", "dest": "public/sign-up.html" },
     { "src": "/login", "dest": "public/login.html" },
+    { "src": "/login-admin", "dest": "public/login-admin.html" },
+    { "src": "/chat", "dest": "public/chat.html" },
     { "src": "/dashboard", "dest": "public/dashboard.html" },
     { "src": "/css/(.*)", "dest": "public/css/$1" },
     { "src": "/js/(.*)", "dest": "public/js/$1" },
