@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="description" content="مُذَكِّر — محادثة نصية خاصة." />
+  <title>المحادثة | مُذَكِّر</title>
+  <link rel="icon" type="image/png" href="https://i.postimg.cc/BncbQFqR/Mudhakkir.png" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Arabic:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/public/css/chat.css" />
+</head>
+<body>
+
+  <header class="chat-header">
+    <div class="chat-header-inner">
+      <a href="/" class="brand" aria-label="مُذَكِّر - الصفحة الرئيسية">
+        <img src="https://i.postimg.cc/BncbQFqR/Mudhakkir.png" alt="شعار مُذَكِّر" class="brand-logo" />
+        <span class="brand-text">
+          <span class="brand-ar">مُذَكِّر</span>
+          <span class="brand-en">Mudhakkir</span>
+        </span>
+      </a>
+
+      <div class="conversation-meta">
+        <p class="conversation-title">المحادثة الخاصة</p>
+        <p class="conversation-status" id="connection-status">جارٍ الاتصال…</p>
+      </div>
+
+      <a href="/" class="btn btn-ghost btn-sm">رجوع</a>
+    </div>
+  </header>
+
+  <main class="chat-main">
+    <section class="chat-panel" aria-label="نافذة المحادثة">
+      <div class="messages" id="messages" aria-live="polite"></div>
+
+      <div class="empty-state" id="empty-state" hidden>
+        <p>لا توجد رسائل بعد.</p>
+        <span class="muted">ابدأ المحادثة بكتابة رسالة في الأسفل.</span>
+      </div>
+
+      <form class="composer" id="composer" autocomplete="off">
+        <label class="sr-only" for="message-input">اكتب رسالة</label>
+        <textarea
+          id="message-input"
+          name="message"
+          rows="1"
+          maxlength="2000"
+          placeholder="اكتب رسالة…"
+          required
+        ></textarea>
+        <button type="submit" class="btn btn-primary" id="send-btn">إرسال</button>
+      </form>
+    </section>
+  </main>
+
+  <div class="modal" id="confirm-modal" hidden role="dialog" aria-modal="true" aria-labelledby="confirm-title">
+    <div class="modal-card">
+      <h3 id="confirm-title">تأكيد العملية</h3>
+      <p id="confirm-message">هل أنت متأكد؟</p>
+      <div class="modal-actions">
+        <button type="button" class="btn btn-ghost" id="confirm-cancel">إلغاء</button>
+        <button type="button" class="btn btn-danger" id="confirm-ok">تأكيد</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="/public/js/chat.js" defer></script>
+</body>
+</html>
