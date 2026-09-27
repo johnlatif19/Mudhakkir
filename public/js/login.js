@@ -55,8 +55,8 @@
       setFieldError(els.username, els.usernameError, "");
     }
 
-    if (password.length < 6) {
-      setFieldError(els.password, els.passwordError, "كلمة المرور يجب ألا تقل عن 6 أحرف.");
+    if (password.length < 4) {
+      setFieldError(els.password, els.passwordError, "كلمة المرور يجب ألا تقل عن 4 أحرف.");
       ok = false;
     } else {
       setFieldError(els.password, els.passwordError, "");
