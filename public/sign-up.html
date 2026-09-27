@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="description" content="مُذَكِّر — إنشاء حساب جديد." />
+  <title>إنشاء حساب | مُذَكِّر</title>
+  <link rel="icon" type="image/png" href="https://i.postimg.cc/BncbQFqR/Mudhakkir.png" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Arabic:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/public/css/sign-up.css" />
+</head>
+<body>
+
+  <main class="auth-main">
+    <section class="auth-card" aria-labelledby="signup-title">
+      <header class="auth-header">
+        <img src="https://i.postimg.cc/BncbQFqR/Mudhakkir.png" alt="شعار مُذَكِّر" class="auth-logo" />
+        <h1 id="signup-title" class="auth-title">مُذَكِّر | Mudhakkir</h1>
+        <p class="auth-subtitle">أنشئ حسابك لمتابعة صلواتك الخمس.</p>
+      </header>
+
+      <form id="signup-form" class="auth-form" novalidate>
+        <div class="field">
+          <label for="name">الاسم</label>
+          <input
+            type="text"
+            id="name"
+            name="name"
+            autocomplete="username"
+            required
+            minlength="2"
+            maxlength="40"
+            aria-describedby="name-error"
+          />
+          <p class="field-error" id="name-error" hidden></p>
+        </div>
+
+        <div class="field">
+          <label for="password">كلمة المرور</label>
+          <div class="password-wrap">
+            <input
+              type="password"
+              id="password"
+              name="password"
+              autocomplete="new-password"
+              required
+              minlength="6"
+              maxlength="128"
+              aria-describedby="password-error"
+            />
+            <button type="button" class="password-toggle" id="password-toggle" aria-label="إظهار كلمة المرور">
+              إظهار
+            </button>
+          </div>
+          <p class="field-error" id="password-error" hidden></p>
+        </div>
+
+        <p class="form-error" id="form-error" role="alert" hidden></p>
+
+        <button type="submit" class="btn btn-primary btn-block" id="submit-btn">
+          <span class="btn-label">إنشاء الحساب</span>
+          <span class="btn-spinner" aria-hidden="true"></span>
+        </button>
+      </form>
+
+      <footer class="auth-footer">
+        <p>لديك حساب بالفعل؟ <a href="/login" class="link-inline">سجّل الدخول</a></p>
+        <a href="/" class="link-muted">العودة إلى الصفحة الرئيسية</a>
+      </footer>
+    </section>
+  </main>
+
+  <script src="/public/js/sign-up.js" defer></script>
+</body>
+</html>
