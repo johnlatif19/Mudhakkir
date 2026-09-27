@@ -11,6 +11,7 @@ const rateLimit = require("express-rate-limit");
 const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
 const admin = require("firebase-admin");
+const webpush = require("web-push");
 const cloudinary = require("cloudinary").v2;
 
 const PORT = process.env.PORT || 3000;
@@ -20,13 +21,39 @@ const IS_PROD = NODE_ENV === "production";
 const JWT_SECRET = process.env.JWT_SECRET;
 const ADMIN_USERNAME = process.env.ADMIN_USERNAME;
 const ADMIN_PASSWORD_HASH = process.env.ADMIN_PASSWORD_HASH;
+const CRON_SECRET = process.env.CRON_SECRET;
+
+const VAPID_PUBLIC_KEY = process.env.VAPID_PUBLIC_KEY;
+const VAPID_PRIVATE_KEY = process.env.VAPID_PRIVATE_KEY;
+const VAPID_SUBJECT = process.env.VAPID_SUBJECT || "mailto:admin@example.com";
 
 const COOKIE_NAME = "mudhakkir_token";
 const TOKEN_TTL = "7d";
 
+const PRAYER_KEYS = ["fajr", "dhuhr", "asr", "maghrib", "isha"];
+const PRAYER_LABELS_AR = {
+  fajr: "الفجر",
+  dhuhr: "الظهر",
+  asr: "العصر",
+  maghrib: "المغرب",
+  isha: "العشاء"
+};
+
+const DEFAULT_COORDS = { lat: 21.4225, lng: 39.8262 };
+const PRAYER_CACHE_TTL_MS = 30 * 60 * 1000;
+const prayerCache = new Map();
+
 if (!JWT_SECRET || !ADMIN_USERNAME || !ADMIN_PASSWORD_HASH) {
   console.error("Missing required environment variables: JWT_SECRET, ADMIN_USERNAME, ADMIN_PASSWORD_HASH");
   process.exit(1);
+}
+
+if (!VAPID_PUBLIC_KEY || !VAPID_PRIVATE_KEY) {
+  console.warn("VAPID keys missing — push notifications disabled.");
+}
+
+if (!CRON_SECRET) {
+  console.warn("CRON_SECRET missing — /api/push/check will reject all requests.");
 }
 
 function initFirebase() {
@@ -58,6 +85,10 @@ function initFirebase() {
 initFirebase();
 const db = admin.firestore();
 
+if (VAPID_PUBLIC_KEY && VAPID_PRIVATE_KEY) {
+  webpush.setVapidDetails(VAPID_SUBJECT, VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY);
+}
+
 if (process.env.CLOUDINARY_CLOUD_NAME) {
   cloudinary.config({
     cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
@@ -68,7 +99,6 @@ if (process.env.CLOUDINARY_CLOUD_NAME) {
 }
 
 const app = express();
-
 app.set("trust proxy", 1);
 
 app.use(helmet({
@@ -76,17 +106,13 @@ app.use(helmet({
   crossOriginResourcePolicy: { policy: "cross-origin" }
 }));
 
-app.use(cors({
-  origin: true,
-  credentials: true
-}));
-
-app.use(express.json({ limit: "32kb" }));
+app.use(cors({ origin: true, credentials: true }));
+app.use(express.json({ limit: "64kb" }));
 app.use(cookieParser());
 
 const loginLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
-  max: 20,
+  max: 30,
   standardHeaders: true,
   legacyHeaders: false,
   message: { error: "محاولات كثيرة. حاول لاحقًا." }
@@ -94,7 +120,7 @@ const loginLimiter = rateLimit({
 
 const writeLimiter = rateLimit({
   windowMs: 60 * 1000,
-  max: 60,
+  max: 80,
   standardHeaders: true,
   legacyHeaders: false,
   message: { error: "عدد الطلبات كبير. حاول بعد قليل." }
@@ -138,6 +164,16 @@ function authenticate(req, res, next) {
   }
 }
 
+function optionalAuth(req, _res, next) {
+  const token = readToken(req);
+  if (!token) return next();
+  try {
+    const payload = jwt.verify(token, JWT_SECRET);
+    req.user = { id: payload.sub, name: payload.name, role: payload.role };
+  } catch (_) {}
+  return next();
+}
+
 function requireAdmin(req, res, next) {
   if (!req.user || req.user.role !== "admin") {
     return res.status(403).json({ error: "ممنوع." });
@@ -148,6 +184,14 @@ function requireAdmin(req, res, next) {
 function sanitizeText(value, max = 2000) {
   if (typeof value !== "string") return "";
   return value.replace(/\u0000/g, "").trim().slice(0, max);
+}
+
+function normalizeName(name) {
+  return sanitizeText(name, 40).replace(/\s+/g, " ").toLowerCase();
+}
+
+function nameToId(nameLower) {
+  return nameLower.replace(/[^a-z0-9\u0600-\u06FF]/g, "_").slice(0, 80);
 }
 
 function todayKey(date = new Date()) {
@@ -165,19 +209,6 @@ function weekStart(date = new Date()) {
   d.setHours(0, 0, 0, 0);
   return d;
 }
-
-const PRAYER_KEYS = ["fajr", "dhuhr", "asr", "maghrib", "isha"];
-const PRAYER_LABELS_AR = {
-  fajr: "الفجر",
-  dhuhr: "الظهر",
-  asr: "العصر",
-  maghrib: "المغرب",
-  isha: "العشاء"
-};
-
-const DEFAULT_COORDS = { lat: 21.4225, lng: 39.8262 };
-const PRAYER_CACHE_TTL_MS = 30 * 60 * 1000;
-const prayerCache = new Map();
 
 async function fetchTimingsFromAlAdhan(lat, lng, dateKey) {
   const url = `https://api.aladhan.com/v1/timings/${dateKey}?latitude=${lat}&longitude=${lng}&method=4`;
@@ -241,35 +272,156 @@ function serializeMessage(id, data) {
     text: data.deletedAt ? "" : (data.text || ""),
     createdAt: data.createdAt && data.createdAt.toDate ? data.createdAt.toDate().toISOString() : null,
     updatedAt: data.updatedAt && data.updatedAt.toDate ? data.updatedAt.toDate().toISOString() : null,
-    deletedAt: data.deletedAt && data.deletedAt.toDate ? data.deletedAt.toDate().toISOString() : null,
-    readAt: data.readAt && data.readAt.toDate ? data.readAt.toDate().toISOString() : null
+    deletedAt: data.deletedAt && data.deletedAt.toDate ? data.deletedAt.toDate().toISOString() : null
   };
 }
+
+async function ensureAdminSeed() {
+  try {
+    const adminId = nameToId(ADMIN_USERNAME.toLowerCase());
+    const ref = db.collection("users").doc(adminId);
+    const doc = await ref.get();
+    if (!doc.exists) {
+      await ref.set({
+        id: adminId,
+        name: ADMIN_USERNAME,
+        nameLower: ADMIN_USERNAME.toLowerCase(),
+        passwordHash: ADMIN_PASSWORD_HASH,
+        role: "admin",
+        createdAt: admin.firestore.FieldValue.serverTimestamp()
+      });
+      console.log("Admin user seeded:", adminId);
+    }
+  } catch (err) {
+    console.error("admin seed error:", err.message);
+  }
+}
+
+ensureAdminSeed();
 
 app.get("/api/health", (_req, res) => {
   res.json({ ok: true });
 });
 
+app.get("/api/config", (_req, res) => {
+  res.json({ vapidPublicKey: VAPID_PUBLIC_KEY || null });
+});
+
+app.post("/api/auth/signup", loginLimiter, async (req, res) => {
+  try {
+    const name = sanitizeText(req.body && req.body.name, 40);
+    const password = typeof (req.body && req.body.password) === "string" ? req.body.password : "";
+
+    if (name.length < 2) {
+      return res.status(400).json({ error: "الاسم قصير جدًا." });
+    }
+    if (password.length < 6) {
+      return res.status(400).json({ error: "كلمة المرور يجب ألا تقل عن 6 أحرف." });
+    }
+
+    const nameLower = normalizeName(name);
+    const userId = nameToId(nameLower);
+
+    const ref = db.collection("users").doc(userId);
+    const existing = await ref.get();
+    if (existing.exists) {
+      return res.status(409).json({ error: "الاسم مستخدم بالفعل. جرّب اسمًا آخر." });
+    }
+
+    const passwordHash = await bcrypt.hash(password, 10);
+
+    await ref.set({
+      id: userId,
+      name,
+      nameLower,
+      passwordHash,
+      role: "user",
+      createdAt: admin.firestore.FieldValue.serverTimestamp()
+    });
+
+    const token = signToken({ sub: userId, name, role: "user" });
+    setAuthCookie(res, token);
+
+    return res.status(201).json({ user: { id: userId, name, role: "user" } });
+  } catch (err) {
+    console.error("signup error:", err.message);
+    return res.status(500).json({ error: "تعذّر إنشاء الحساب." });
+  }
+});
+
 app.post("/api/auth/login", loginLimiter, async (req, res) => {
-  const username = sanitizeText(req.body && req.body.username, 64);
-  const password = typeof (req.body && req.body.password) === "string" ? req.body.password : "";
+  try {
+    const name = sanitizeText(req.body && req.body.name, 40);
+    const password = typeof (req.body && req.body.password) === "string" ? req.body.password : "";
 
-  if (!username || !password) {
-    return res.status(400).json({ error: "أدخل اسم المستخدم وكلمة المرور." });
+    if (!name || !password) {
+      return res.status(400).json({ error: "أدخل الاسم وكلمة المرور." });
+    }
+
+    const nameLower = normalizeName(name);
+    const userId = nameToId(nameLower);
+    const ref = db.collection("users").doc(userId);
+    const doc = await ref.get();
+
+    if (!doc.exists) {
+      return res.status(401).json({ error: "الاسم أو كلمة المرور غير صحيحة." });
+    }
+
+    const data = doc.data();
+    if (data.role === "admin") {
+      return res.status(403).json({ error: "استخدم صفحة دخول الأدمن." });
+    }
+
+    const ok = await bcrypt.compare(password, data.passwordHash);
+    if (!ok) {
+      return res.status(401).json({ error: "الاسم أو كلمة المرور غير صحيحة." });
+    }
+
+    const token = signToken({ sub: data.id, name: data.name, role: data.role });
+    setAuthCookie(res, token);
+
+    return res.json({ user: { id: data.id, name: data.name, role: data.role } });
+  } catch (err) {
+    console.error("login error:", err.message);
+    return res.status(500).json({ error: "تعذّر تسجيل الدخول." });
   }
+});
 
-  if (username !== ADMIN_USERNAME) {
-    return res.status(401).json({ error: "بيانات الدخول غير صحيحة." });
+app.post("/api/auth/login-admin", loginLimiter, async (req, res) => {
+  try {
+    const username = sanitizeText(req.body && req.body.username, 40);
+    const password = typeof (req.body && req.body.password) === "string" ? req.body.password : "";
+
+    if (!username || !password) {
+      return res.status(400).json({ error: "أدخل اسم المستخدم وكلمة المرور." });
+    }
+
+    const userId = nameToId(username.toLowerCase());
+    const ref = db.collection("users").doc(userId);
+    const doc = await ref.get();
+
+    if (!doc.exists) {
+      return res.status(401).json({ error: "بيانات الدخول غير صحيحة." });
+    }
+
+    const data = doc.data();
+    if (data.role !== "admin") {
+      return res.status(403).json({ error: "هذا الحساب ليس أدمن." });
+    }
+
+    const ok = await bcrypt.compare(password, data.passwordHash);
+    if (!ok) {
+      return res.status(401).json({ error: "بيانات الدخول غير صحيحة." });
+    }
+
+    const token = signToken({ sub: data.id, name: data.name, role: "admin" });
+    setAuthCookie(res, token);
+
+    return res.json({ user: { id: data.id, name: data.name, role: "admin" } });
+  } catch (err) {
+    console.error("admin login error:", err.message);
+    return res.status(500).json({ error: "تعذّر تسجيل الدخول." });
   }
-
-  const ok = await bcrypt.compare(password, ADMIN_PASSWORD_HASH);
-  if (!ok) {
-    return res.status(401).json({ error: "بيانات الدخول غير صحيحة." });
-  }
-
-  const token = signToken({ sub: "admin", name: ADMIN_USERNAME, role: "admin" });
-  setAuthCookie(res, token);
-  return res.json({ user: { id: "admin", name: ADMIN_USERNAME, role: "admin" } });
 });
 
 app.post("/api/auth/logout", (req, res) => {
@@ -277,7 +429,8 @@ app.post("/api/auth/logout", (req, res) => {
   res.json({ ok: true });
 });
 
-app.get("/api/auth/me", authenticate, (req, res) => {
+app.get("/api/auth/me", optionalAuth, (req, res) => {
+  if (!req.user) return res.status(401).json({ error: "غير مصرّح." });
   res.json({ user: req.user });
 });
 
@@ -289,9 +442,7 @@ app.post("/api/visits", writeLimiter, async (req, res) => {
     const referrer = sanitizeText(req.body && req.body.referrer, 300) || null;
     const userAgent = sanitizeText(req.headers["user-agent"] || "", 300) || null;
 
-    if (!sessionId) {
-      return res.status(400).json({ error: "sessionId مطلوب." });
-    }
+    if (!sessionId) return res.status(400).json({ error: "sessionId مطلوب." });
 
     const dayKey = todayKey();
     const dedupeId = `${sessionId}_${dayKey}_${page}`.replace(/[^A-Za-z0-9_\-]/g, "_").slice(0, 200);
@@ -363,6 +514,7 @@ app.post("/api/prayers/complete", authenticate, writeLimiter, async (req, res) =
 
     await ref.set({
       userId,
+      userName: req.user.name,
       prayer,
       date: dateKey,
       completed,
@@ -382,17 +534,45 @@ app.post("/api/prayers/complete", authenticate, writeLimiter, async (req, res) =
   }
 });
 
+app.post("/api/prayers/reset", authenticate, writeLimiter, async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const dateKey = todayKey();
+
+    const snap = await db.collection("prayer_records")
+      .where("userId", "==", userId)
+      .where("date", "==", dateKey)
+      .get();
+
+    const batch = db.batch();
+    snap.forEach((doc) => batch.delete(doc.ref));
+    await batch.commit();
+
+    const [times, recordsMap] = await Promise.all([
+      getPrayerTimes(DEFAULT_COORDS.lat, DEFAULT_COORDS.lng),
+      loadRecordsMap(userId, dateKey)
+    ]);
+
+    const prayers = buildPrayersPayload(times, recordsMap);
+    return res.json({ date: dateKey, prayers });
+  } catch (err) {
+    console.error("prayer reset error:", err.message);
+    return res.status(500).json({ error: "تعذّر إعادة الصلوات." });
+  }
+});
+
 app.get("/api/dashboard/stats", authenticate, requireAdmin, async (_req, res) => {
   try {
     const dateKey = todayKey();
     const weekStartDate = weekStart();
 
-    const [visitsSnap, prayersSnap] = await Promise.all([
+    const [visitsSnap, prayersSnap, usersSnap] = await Promise.all([
       db.collection("visits").get(),
       db.collection("prayer_records")
         .where("date", "==", dateKey)
         .where("completed", "==", true)
-        .get()
+        .get(),
+      db.collection("users").where("role", "==", "user").get()
     ]);
 
     const allSessions = new Set();
@@ -415,7 +595,8 @@ app.get("/api/dashboard/stats", authenticate, requireAdmin, async (_req, res) =>
         totalVisitors: allSessions.size,
         todayVisitors: todaySessions.size,
         weekVisitors: weekSessions.size,
-        completedPrayersToday: prayersSnap.size
+        completedPrayersToday: prayersSnap.size,
+        totalUsers: usersSnap.size
       }
     });
   } catch (err) {
@@ -448,6 +629,53 @@ app.get("/api/dashboard/visits", authenticate, requireAdmin, async (req, res) =>
   } catch (err) {
     console.error("dashboard visits error:", err.message);
     res.status(500).json({ error: "تعذّر جلب الزيارات." });
+  }
+});
+
+app.get("/api/dashboard/users", authenticate, requireAdmin, async (_req, res) => {
+  try {
+    const dateKey = todayKey();
+
+    const usersSnap = await db.collection("users")
+      .where("role", "==", "user")
+      .get();
+
+    const prayersSnap = await db.collection("prayer_records")
+      .where("date", "==", dateKey)
+      .get();
+
+    const prayersByUser = new Map();
+    prayersSnap.forEach((doc) => {
+      const data = doc.data();
+      if (!prayersByUser.has(data.userId)) {
+        prayersByUser.set(data.userId, new Map());
+      }
+      prayersByUser.get(data.userId).set(data.prayer, !!data.completed);
+    });
+
+    const users = usersSnap.docs.map((doc) => {
+      const data = doc.data();
+      const map = prayersByUser.get(data.id) || new Map();
+      const prayers = {};
+      PRAYER_KEYS.forEach((k) => {
+        prayers[k] = !!map.get(k);
+      });
+      const completed = PRAYER_KEYS.filter((k) => prayers[k]).length;
+      return {
+        id: data.id,
+        name: data.name,
+        createdAt: data.createdAt && data.createdAt.toDate
+          ? data.createdAt.toDate().toISOString()
+          : null,
+        prayers,
+        completedCount: completed
+      };
+    });
+
+    res.json({ date: dateKey, users });
+  } catch (err) {
+    console.error("dashboard users error:", err.message);
+    res.status(500).json({ error: "تعذّر جلب المستخدمين." });
   }
 });
 
@@ -488,8 +716,7 @@ app.post("/api/messages", authenticate, writeLimiter, async (req, res) => {
       text,
       createdAt: admin.firestore.FieldValue.serverTimestamp(),
       updatedAt: null,
-      deletedAt: null,
-      readAt: null
+      deletedAt: null
     });
 
     const doc = await docRef.get();
@@ -555,21 +782,196 @@ app.delete("/api/messages/:id", authenticate, writeLimiter, async (req, res) => 
   }
 });
 
+app.post("/api/push/subscribe", authenticate, writeLimiter, async (req, res) => {
+  try {
+    const sub = req.body && req.body.subscription;
+    if (!sub || !sub.endpoint) {
+      return res.status(400).json({ error: "subscription غير صالح." });
+    }
+
+    const subId = Buffer.from(sub.endpoint).toString("base64").replace(/[^A-Za-z0-9]/g, "").slice(0, 120);
+
+    await db.collection("push_subscriptions").doc(subId).set({
+      userId: req.user.id,
+      userName: req.user.name,
+      subscription: sub,
+      createdAt: admin.firestore.FieldValue.serverTimestamp()
+    }, { merge: true });
+
+    res.json({ ok: true });
+  } catch (err) {
+    console.error("push subscribe error:", err.message);
+    res.status(500).json({ error: "تعذّر تسجيل الإشعارات." });
+  }
+});
+
+app.post("/api/push/unsubscribe", authenticate, writeLimiter, async (req, res) => {
+  try {
+    const endpoint = req.body && req.body.endpoint;
+    if (!endpoint) return res.status(400).json({ error: "endpoint مطلوب." });
+
+    const subId = Buffer.from(endpoint).toString("base64").replace(/[^A-Za-z0-9]/g, "").slice(0, 120);
+    await db.collection("push_subscriptions").doc(subId).delete();
+    res.json({ ok: true });
+  } catch (err) {
+    console.error("push unsubscribe error:", err.message);
+    res.status(500).json({ error: "تعذّر إلغاء الإشعارات." });
+  }
+});
+
+function parseTimeToDate(timeStr, baseDate) {
+  if (!timeStr || typeof timeStr !== "string") return null;
+  const clean = timeStr.split(" ")[0];
+  const [hh, mm] = clean.split(":").map((n) => parseInt(n, 10));
+  if (isNaN(hh) || isNaN(mm)) return null;
+  const d = new Date(baseDate);
+  d.setHours(hh, mm, 0, 0);
+  return d;
+}
+
+app.post("/api/push/check", async (req, res) => {
+  try {
+    const secret = req.headers["x-cron-secret"] || "";
+    if (!CRON_SECRET || secret !== CRON_SECRET) {
+      return res.status(401).json({ error: "غير مصرّح." });
+    }
+
+    if (!VAPID_PUBLIC_KEY || !VAPID_PRIVATE_KEY) {
+      return res.status(503).json({ error: "Push غير مهيأ." });
+    }
+
+    const now = new Date();
+    const dateKey = todayKey(now);
+    const timings = await getPrayerTimes(DEFAULT_COORDS.lat, DEFAULT_COORDS.lng);
+
+    const prayerTimes = {};
+    PRAYER_KEYS.forEach((k) => {
+      prayerTimes[k] = parseTimeToDate(timings[k], now);
+    });
+
+    const subsSnap = await db.collection("push_subscriptions").get();
+    if (subsSnap.empty) {
+      return res.json({ ok: true, sent: 0, checked: 0 });
+    }
+
+    const userIds = new Set();
+    subsSnap.forEach((doc) => {
+      const data = doc.data();
+      if (data.userId) userIds.add(data.userId);
+    });
+
+    const recordsSnap = await db.collection("prayer_records")
+      .where("date", "==", dateKey)
+      .get();
+
+    const completedByUser = new Map();
+    recordsSnap.forEach((doc) => {
+      const data = doc.data();
+      if (!completedByUser.has(data.userId)) completedByUser.set(data.userId, new Set());
+      if (data.completed) completedByUser.get(data.userId).add(data.prayer);
+    });
+
+    const stages = [
+      { key: "t10", offsetMin: -10 },
+      { key: "t5", offsetMin: -5 },
+      { key: "now", offsetMin: 0 }
+    ];
+
+    const windowTolerance = 3;
+
+    let sent = 0;
+    const errors = [];
+
+    for (const subDoc of subsSnap.docs) {
+      const subData = subDoc.data();
+      const userId = subData.userId;
+      const subscription = subData.subscription;
+      if (!userId || !subscription) continue;
+
+      const completed = completedByUser.get(userId) || new Set();
+
+      for (const prayer of PRAYER_KEYS) {
+        if (completed.has(prayer)) continue;
+        const pTime = prayerTimes[prayer];
+        if (!pTime) continue;
+
+        for (const stage of stages) {
+          const target = new Date(pTime.getTime() + stage.offsetMin * 60 * 1000);
+          const diffMin = (now - target) / (60 * 1000);
+          if (diffMin < 0 || diffMin > windowTolerance) continue;
+
+          const logId = `${userId}_${prayer}_${dateKey}_${stage.key}`.replace(/[^A-Za-z0-9_\-]/g, "_");
+          const logRef = db.collection("push_log").doc(logId);
+          const logDoc = await logRef.get();
+          if (logDoc.exists) continue;
+
+          const payload = JSON.stringify({
+            title: "مُذَكِّر",
+            body: stage.key === "now"
+              ? `حان الآن وقت صلاة ${PRAYER_LABELS_AR[prayer]}`
+              : `باقي ${Math.abs(stage.offsetMin)} دقيقة على صلاة ${PRAYER_LABELS_AR[prayer]}`,
+            tag: `${prayer}_${stage.key}_${dateKey}`,
+            url: "/"
+          });
+
+          try {
+            await webpush.sendNotification(subscription, payload);
+            await logRef.set({
+              userId,
+              prayer,
+              date: dateKey,
+              stage: stage.key,
+              sentAt: admin.firestore.FieldValue.serverTimestamp()
+            });
+            sent += 1;
+          } catch (err) {
+            errors.push({ subId: subDoc.id, code: err.statusCode || null });
+            if (err.statusCode === 404 || err.statusCode === 410) {
+              await subDoc.ref.delete().catch(() => {});
+            }
+          }
+        }
+      }
+    }
+
+    return res.json({ ok: true, sent, checked: subsSnap.size, errors: errors.length });
+  } catch (err) {
+    console.error("push check error:", err.message);
+    return res.status(500).json({ error: "تعذّر فحص الإشعارات." });
+  }
+});
+
 app.use(express.static(path.join(__dirname, "public"), {
   extensions: ["html"],
   maxAge: IS_PROD ? "1h" : 0
 }));
 
-app.get("/chat", (_req, res) => {
-  res.sendFile(path.join(__dirname, "public", "chat.html"));
+app.get("/sign-up", (_req, res) => {
+  res.sendFile(path.join(__dirname, "public", "sign-up.html"));
 });
 
 app.get("/login", (_req, res) => {
   res.sendFile(path.join(__dirname, "public", "login.html"));
 });
 
+app.get("/login-admin", (_req, res) => {
+  res.sendFile(path.join(__dirname, "public", "login-admin.html"));
+});
+
+app.get("/chat", (_req, res) => {
+  res.sendFile(path.join(__dirname, "public", "chat.html"));
+});
+
 app.get("/dashboard", (_req, res) => {
   res.sendFile(path.join(__dirname, "public", "dashboard.html"));
+});
+
+app.get("/sw.js", (_req, res) => {
+  res.sendFile(path.join(__dirname, "public", "sw.js"));
+});
+
+app.get("/manifest.json", (_req, res) => {
+  res.sendFile(path.join(__dirname, "public", "manifest.json"));
 });
 
 app.use((req, res) => {
