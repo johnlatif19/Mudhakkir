@@ -32,11 +32,15 @@
     });
     if (res.status === 401) {
       location.replace("/login-admin");
-      throw new Error("unauthorized");
+      const err = new Error("unauthorized");
+      err.status = 401;
+      throw err;
     }
     if (res.status === 403) {
       location.replace("/");
-      throw new Error("forbidden");
+      const err = new Error("forbidden");
+      err.status = 403;
+      throw err;
     }
     if (!res.ok) {
       let message = `HTTP ${res.status}`;
@@ -44,7 +48,9 @@
         const data = await res.json();
         if (data && data.error) message = data.error;
       } catch (_) {}
-      throw new Error(message);
+      const err = new Error(message);
+      err.status = res.status;
+      throw err;
     }
     const ct = res.headers.get("content-type") || "";
     return ct.includes("application/json") ? res.json() : res.text();
@@ -197,7 +203,7 @@
     try {
       await Promise.all([loadStats(), loadUsers(), loadVisits()]);
     } catch (err) {
-      if (err.message !== "unauthorized" && err.message !== "forbidden") {
+      if (err.status !== 401 && err.status !== 403) {
         console.warn("تعذّر تحديث اللوحة:", err.message);
       }
     }
