@@ -4,7 +4,7 @@
   const els = {};
 
   function cacheEls() {
-    els.form = document.getElementById("login-form");
+    els.form = document.getElementById("admin-login-form");
     els.username = document.getElementById("username");
     els.password = document.getElementById("password");
     els.usernameError = document.getElementById("username-error");
@@ -49,14 +49,14 @@
     const password = els.password.value;
 
     if (username.length < 3) {
-      setFieldError(els.username, els.usernameError, "أدخل اسم مستخدم صحيحًا (3 أحرف على الأقل).");
+      setFieldError(els.username, els.usernameError, "أدخل اسم المستخدم.");
       ok = false;
     } else {
       setFieldError(els.username, els.usernameError, "");
     }
 
-    if (password.length < 4) {
-      setFieldError(els.password, els.passwordError, "كلمة المرور يجب ألا تقل عن 4 أحرف.");
+    if (password.length < 6) {
+      setFieldError(els.password, els.passwordError, "كلمة المرور يجب ألا تقل عن 6 أحرف.");
       ok = false;
     } else {
       setFieldError(els.password, els.passwordError, "");
@@ -72,7 +72,7 @@
 
     setLoading(true);
     try {
-      const res = await fetch("/api/auth/login", {
+      const res = await fetch("/api/auth/login-admin", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         credentials: "include",
@@ -92,9 +92,7 @@
         return;
       }
 
-      const params = new URLSearchParams(location.search);
-      const next = params.get("next") || "/dashboard";
-      location.replace(next);
+      location.replace("/dashboard");
     } catch (err) {
       setFormError("تعذّر الاتصال بالخدمة. حاول مرة أخرى.");
     } finally {
@@ -115,7 +113,9 @@
       const res = await fetch("/api/auth/me", { credentials: "include" });
       if (res.ok) {
         const data = await res.json();
-        if (data && data.user) location.replace("/dashboard");
+        if (data && data.user && data.user.role === "admin") {
+          location.replace("/dashboard");
+        }
       }
     } catch (_) {}
   }
