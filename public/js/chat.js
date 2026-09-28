@@ -7,15 +7,17 @@
   const state = {
     currentUser: null,
     messages: [],
-    lastIds: new Set(),
     polling: null,
     editingId: null,
-    pendingDeleteId: null
+    pendingDeleteId: null,
+    sending: false
   };
 
   const els = {};
 
   function cacheEls() {
+    els.gate = document.getElementById("gate");
+    els.panel = document.getElementById("chat-panel");
     els.messages = document.getElementById("messages");
     els.emptyState = document.getElementById("empty-state");
     els.form = document.getElementById("composer");
@@ -26,6 +28,8 @@
     els.modalMsg = document.getElementById("confirm-message");
     els.confirmOk = document.getElementById("confirm-ok");
     els.confirmCancel = document.getElementById("confirm-cancel");
+    els.logout = document.getElementById("logout-btn");
+    els.toast = document.getElementById("toast");
   }
 
   async function apiFetch(path, options = {}) {
@@ -34,13 +38,20 @@
       credentials: "include",
       ...options
     });
+    if (res.status === 401) {
+      const err = new Error("unauthorized");
+      err.status = 401;
+      throw err;
+    }
     if (!res.ok) {
       let message = `HTTP ${res.status}`;
       try {
         const data = await res.json();
         if (data && data.error) message = data.error;
       } catch (_) {}
-      throw new Error(message);
+      const err = new Error(message);
+      err.status = res.status;
+      throw err;
     }
     if (res.status === 204) return null;
     const ct = res.headers.get("content-type") || "";
@@ -55,6 +66,7 @@
   }
 
   function formatTime(iso) {
+    if (!iso) return "";
     try {
       return new Intl.DateTimeFormat("ar", {
         hour: "2-digit",
@@ -90,6 +102,31 @@
 
   function isMine(msg) {
     return state.currentUser && msg.senderId === state.currentUser.id;
+  }
+
+  let toastTimer = null;
+  function showToast(text, variant) {
+    if (!els.toast) return;
+    els.toast.textContent = text;
+    els.toast.classList.remove("is-error", "is-success");
+    if (variant) els.toast.classList.add(variant);
+    els.toast.hidden = false;
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => { els.toast.hidden = true; }, 3000);
+  }
+
+  function checkIcon() {
+    const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+    svg.setAttribute("viewBox", "0 0 24 24");
+    svg.setAttribute("fill", "none");
+    svg.setAttribute("stroke", "currentColor");
+    svg.setAttribute("stroke-width", "2.4");
+    svg.setAttribute("stroke-linecap", "round");
+    svg.setAttribute("stroke-linejoin", "round");
+    const p = document.createElementNS("http://www.w3.org/2000/svg", "path");
+    p.setAttribute("d", "M20 6L9 17l-5-5");
+    svg.appendChild(p);
+    return svg;
   }
 
   function renderAll() {
@@ -157,14 +194,6 @@
       edited.className = "edited-flag";
       edited.textContent = "معدّلة";
       meta.appendChild(edited);
-    }
-
-    if (mine && !msg.deletedAt) {
-      const status = document.createElement("span");
-      status.className = "message-status";
-      status.textContent = msg.readAt ? "تم القراءة" : "تم الإرسال";
-      if (msg.readAt) status.classList.add("is-read");
-      meta.appendChild(status);
     }
 
     wrap.appendChild(meta);
@@ -290,11 +319,16 @@
       renderAll();
       setStatus("متصل", "is-online");
     } catch (err) {
+      if (err.status === 401) {
+        showGate();
+        return;
+      }
       setStatus("تعذّر الاتصال", "is-offline");
     }
   }
 
   async function pollNew() {
+    if (!state.currentUser) return;
     try {
       const since = state.messages.length
         ? state.messages[state.messages.length - 1].createdAt
@@ -308,13 +342,18 @@
       }
       setStatus("متصل", "is-online");
     } catch (err) {
+      if (err.status === 401) {
+        showGate();
+        return;
+      }
       setStatus("انقطع الاتصال", "is-offline");
     }
   }
 
   async function sendMessage(text) {
     const trimmed = text.trim();
-    if (!trimmed) return;
+    if (!trimmed || state.sending) return;
+    state.sending = true;
     els.sendBtn.disabled = true;
     try {
       const data = await apiFetch(API, {
@@ -328,8 +367,13 @@
       els.input.value = "";
       autoGrow();
     } catch (err) {
-      alert("تعذّر إرسال الرسالة: " + err.message);
+      if (err.status === 401) {
+        showGate();
+      } else {
+        showToast("تعذّر إرسال الرسالة: " + err.message, "is-error");
+      }
     } finally {
+      state.sending = false;
       els.sendBtn.disabled = false;
       els.input.focus();
     }
@@ -348,8 +392,9 @@
       }
       state.editingId = null;
       renderAll();
+      showToast("تم تعديل الرسالة", "is-success");
     } catch (err) {
-      alert("تعذّر تعديل الرسالة: " + err.message);
+      showToast("تعذّر تعديل الرسالة: " + err.message, "is-error");
     }
   }
 
@@ -362,17 +407,41 @@
         msg.text = "";
       }
       renderAll();
+      showToast("تم حذف الرسالة", "is-success");
     } catch (err) {
-      alert("تعذّر حذف الرسالة: " + err.message);
+      showToast("تعذّر حذف الرسالة: " + err.message, "is-error");
     }
+  }
+
+  async function logout() {
+    try {
+      await fetch("/api/auth/logout", { method: "POST", credentials: "include" });
+    } catch (_) {}
+    location.replace("/");
+  }
+
+  function showGate() {
+    state.currentUser = null;
+    if (state.polling) clearInterval(state.polling);
+    els.gate.hidden = false;
+    els.panel.hidden = true;
+    els.logout.hidden = true;
+  }
+
+  function showChat() {
+    els.gate.hidden = true;
+    els.panel.hidden = false;
+    els.logout.hidden = false;
   }
 
   async function loadSession() {
     try {
       const data = await apiFetch("/api/auth/me");
       state.currentUser = data.user;
+      return true;
     } catch (_) {
-      state.currentUser = { id: "anonymous", name: "زائر" };
+      state.currentUser = null;
+      return false;
     }
   }
 
@@ -402,6 +471,8 @@
     document.addEventListener("keydown", (e) => {
       if (e.key === "Escape" && !els.modal.hidden) closeConfirm();
     });
+
+    if (els.logout) els.logout.addEventListener("click", logout);
   }
 
   function startPolling() {
@@ -416,7 +487,14 @@
     cacheEls();
     bindEvents();
     autoGrow();
-    await loadSession();
+
+    const ok = await loadSession();
+    if (!ok) {
+      showGate();
+      return;
+    }
+
+    showChat();
     await loadInitial();
     startPolling();
   }
