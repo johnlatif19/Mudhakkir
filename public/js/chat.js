@@ -16,8 +16,6 @@
   const els = {};
 
   function cacheEls() {
-    els.gate = document.getElementById("gate");
-    els.panel = document.getElementById("chat-panel");
     els.messages = document.getElementById("messages");
     els.emptyState = document.getElementById("empty-state");
     els.form = document.getElementById("composer");
@@ -39,6 +37,7 @@
       ...options
     });
     if (res.status === 401) {
+      location.replace("/login");
       const err = new Error("unauthorized");
       err.status = 401;
       throw err;
@@ -319,16 +318,12 @@
       renderAll();
       setStatus("متصل", "is-online");
     } catch (err) {
-      if (err.status === 401) {
-        showGate();
-        return;
-      }
+      if (err.status === 401) return;
       setStatus("تعذّر الاتصال", "is-offline");
     }
   }
 
   async function pollNew() {
-    if (!state.currentUser) return;
     try {
       const since = state.messages.length
         ? state.messages[state.messages.length - 1].createdAt
@@ -342,10 +337,7 @@
       }
       setStatus("متصل", "is-online");
     } catch (err) {
-      if (err.status === 401) {
-        showGate();
-        return;
-      }
+      if (err.status === 401) return;
       setStatus("انقطع الاتصال", "is-offline");
     }
   }
@@ -367,11 +359,8 @@
       els.input.value = "";
       autoGrow();
     } catch (err) {
-      if (err.status === 401) {
-        showGate();
-      } else {
-        showToast("تعذّر إرسال الرسالة: " + err.message, "is-error");
-      }
+      if (err.status === 401) return;
+      showToast("تعذّر إرسال الرسالة: " + err.message, "is-error");
     } finally {
       state.sending = false;
       els.sendBtn.disabled = false;
@@ -394,6 +383,7 @@
       renderAll();
       showToast("تم تعديل الرسالة", "is-success");
     } catch (err) {
+      if (err.status === 401) return;
       showToast("تعذّر تعديل الرسالة: " + err.message, "is-error");
     }
   }
@@ -409,6 +399,7 @@
       renderAll();
       showToast("تم حذف الرسالة", "is-success");
     } catch (err) {
+      if (err.status === 401) return;
       showToast("تعذّر حذف الرسالة: " + err.message, "is-error");
     }
   }
@@ -418,31 +409,6 @@
       await fetch("/api/auth/logout", { method: "POST", credentials: "include" });
     } catch (_) {}
     location.replace("/");
-  }
-
-  function showGate() {
-    state.currentUser = null;
-    if (state.polling) clearInterval(state.polling);
-    els.gate.hidden = false;
-    els.panel.hidden = true;
-    els.logout.hidden = true;
-  }
-
-  function showChat() {
-    els.gate.hidden = true;
-    els.panel.hidden = false;
-    els.logout.hidden = false;
-  }
-
-  async function loadSession() {
-    try {
-      const data = await apiFetch("/api/auth/me");
-      state.currentUser = data.user;
-      return true;
-    } catch (_) {
-      state.currentUser = null;
-      return false;
-    }
   }
 
   function bindEvents() {
@@ -488,13 +454,14 @@
     bindEvents();
     autoGrow();
 
-    const ok = await loadSession();
-    if (!ok) {
-      showGate();
+    try {
+      const data = await apiFetch("/api/auth/me");
+      state.currentUser = data.user;
+    } catch (_) {
+      location.replace("/login");
       return;
     }
 
-    showChat();
     await loadInitial();
     startPolling();
   }
