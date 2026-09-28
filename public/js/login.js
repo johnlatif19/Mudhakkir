@@ -114,7 +114,7 @@
       if (res.ok) {
         const data = await res.json();
         if (data && data.user) {
-          location.replace(data.user.role === "admin" ? "/dashboard" : "/");
+          location.replace("/");
         }
       }
     } catch (_) {}
