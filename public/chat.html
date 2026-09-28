@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <meta name="description" content="مُذَكِّر — محادثة نصية خاصة." />
+  <meta name="description" content="مُذَكِّر — محادثة نصية." />
   <title>المحادثة | مُذَكِّر</title>
   <link rel="icon" type="image/png" href="https://i.postimg.cc/BncbQFqR/Mudhakkir.png" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
@@ -30,28 +30,13 @@
 
       <nav class="chat-nav">
         <a href="/" class="btn btn-ghost btn-sm">رجوع</a>
-        <button type="button" class="btn btn-ghost btn-sm" id="logout-btn" hidden>خروج</button>
+        <button type="button" class="btn btn-ghost btn-sm" id="logout-btn">خروج</button>
       </nav>
     </div>
   </header>
 
   <main class="chat-main">
-
-    <section class="gate" id="gate" hidden aria-labelledby="gate-title">
-      <div class="gate-card">
-        <img src="https://i.postimg.cc/BncbQFqR/Mudhakkir.png" alt="" class="gate-logo" />
-        <h1 id="gate-title">قبل الدخول إلى المحادثة</h1>
-        <p class="gate-desc">
-          لازم يكون عندك حساب عشان تشارك في المحادثة. سجّل دخولك أو أنشئ حسابًا جديدًا.
-        </p>
-        <div class="gate-actions">
-          <a href="/login" class="btn btn-primary">تسجيل الدخول</a>
-          <a href="/sign-up" class="btn btn-ghost">إنشاء حساب</a>
-        </div>
-      </div>
-    </section>
-
-    <section class="chat-panel" id="chat-panel" aria-label="نافذة المحادثة" hidden>
+    <section class="chat-panel" aria-label="نافذة المحادثة">
       <div class="messages" id="messages" aria-live="polite"></div>
 
       <div class="empty-state" id="empty-state" hidden>
@@ -72,7 +57,6 @@
         <button type="submit" class="btn btn-primary" id="send-btn">إرسال</button>
       </form>
     </section>
-
   </main>
 
   <div class="modal" id="confirm-modal" hidden role="dialog" aria-modal="true" aria-labelledby="confirm-title">
