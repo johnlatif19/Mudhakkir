@@ -1,7 +1,48 @@
 (function () {
   "use strict";
 
+  const PRAYER_ORDER = ["fajr", "dhuhr", "asr", "maghrib", "isha"];
+  const PRAYER_LABELS = {
+    fajr: "الفجر",
+    dhuhr: "الظهر",
+    asr: "العصر",
+    maghrib: "المغرب",
+    isha: "العشاء"
+  };
   const SESSION_KEY = "mudhakkir.sessionId";
+
+  const state = {
+    user: null,
+    times: null,
+    prayers: null,
+    busy: false,
+    pushSubscribed: false,
+    pushSupported: false,
+    vapidPublicKey: null
+  };
+
+  const els = {};
+
+  function cacheEls() {
+    els.navAuth = document.getElementById("nav-auth");
+    els.navUserName = document.getElementById("nav-user-name");
+    els.navLogout = document.getElementById("nav-logout");
+    els.heroTitle = document.getElementById("hero-title");
+    els.heroLead = document.getElementById("hero-lead");
+    els.heroCtaSignup = document.getElementById("hero-cta-signup");
+    els.todayPrayers = document.getElementById("today-prayers");
+    els.todayDate = document.getElementById("today-date");
+    els.prayerSource = document.getElementById("prayer-source");
+    els.prayersSubtitle = document.getElementById("prayers-subtitle");
+    els.statusBar = document.getElementById("status-bar");
+    els.statusCount = document.getElementById("status-count");
+    els.btnReset = document.getElementById("btn-reset");
+    els.btnEnablePush = document.getElementById("btn-enable-push");
+    els.pushNote = document.getElementById("push-note");
+    els.grid = document.getElementById("prayer-grid");
+    els.toast = document.getElementById("toast");
+    els.year = document.getElementById("year");
+  }
 
   function getSessionId() {
     try {
@@ -30,9 +71,20 @@
       credentials: "include",
       ...options
     });
+    if (res.status === 401) {
+      const err = new Error("unauthorized");
+      err.status = 401;
+      throw err;
+    }
     if (!res.ok) {
-      const text = await res.text().catch(() => "");
-      throw new Error(text || `HTTP ${res.status}`);
+      let message = `HTTP ${res.status}`;
+      try {
+        const data = await res.json();
+        if (data && data.error) message = data.error;
+      } catch (_) {}
+      const err = new Error(message);
+      err.status = res.status;
+      throw err;
     }
     const ct = res.headers.get("content-type") || "";
     return ct.includes("application/json") ? res.json() : res.text();
@@ -49,6 +101,31 @@
     } catch (_) {
       return date.toLocaleDateString();
     }
+  }
+
+  let toastTimer = null;
+  function showToast(text, variant) {
+    if (!els.toast) return;
+    els.toast.textContent = text;
+    els.toast.classList.remove("is-error", "is-success");
+    if (variant) els.toast.classList.add(variant);
+    els.toast.hidden = false;
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => { els.toast.hidden = true; }, 3200);
+  }
+
+  function checkIcon() {
+    const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+    svg.setAttribute("viewBox", "0 0 24 24");
+    svg.setAttribute("fill", "none");
+    svg.setAttribute("stroke", "currentColor");
+    svg.setAttribute("stroke-width", "2.6");
+    svg.setAttribute("stroke-linecap", "round");
+    svg.setAttribute("stroke-linejoin", "round");
+    const p = document.createElementNS("http://www.w3.org/2000/svg", "path");
+    p.setAttribute("d", "M20 6L9 17l-5-5");
+    svg.appendChild(p);
+    return svg;
   }
 
   function initNav() {
@@ -69,99 +146,338 @@
     });
   }
 
-  function renderPrayerRows(prayers) {
-    const list = document.getElementById("today-prayers");
-    if (!list) return;
-    list.innerHTML = "";
+  function renderAuthUI() {
+    const guestEls = els.navAuth.querySelectorAll('[data-when="guest"]');
+    const userEls = els.navAuth.querySelectorAll('[data-when="user"]');
 
-    prayers.forEach((p) => {
-      const li = document.createElement("li");
-      li.className = "prayer-row";
+    if (state.user) {
+      guestEls.forEach((el) => { el.hidden = true; });
+      userEls.forEach((el) => { el.hidden = false; });
+      els.navUserName.textContent = state.user.name;
+      els.heroCtaSignup.hidden = true;
+      els.prayersSubtitle.textContent = "علّم كل صلاة بعد أدائها، وتُحفظ حالتك تلقائيًا.";
+      els.statusBar.hidden = false;
+    } else {
+      guestEls.forEach((el) => { el.hidden = false; });
+      userEls.forEach((el) => { el.hidden = true; });
+      els.heroCtaSignup.hidden = false;
+      els.prayersSubtitle.textContent = "سجّل دخولك لتعليم صلواتك ومتابعة التزامك اليومي.";
+      els.statusBar.hidden = true;
+    }
 
-      const name = document.createElement("span");
-      name.className = "prayer-name";
-      name.textContent = p.name;
+    renderPrayerLocks();
+  }
 
-      const time = document.createElement("span");
-      time.className = "prayer-time";
-      time.textContent = p.time || "—";
-
-      li.append(name, time);
-      list.appendChild(li);
+  function renderPrayerLocks() {
+    document.querySelectorAll(".prayer-card").forEach((card) => {
+      const action = card.querySelector("[data-action]");
+      const locked = card.querySelector("[data-locked]");
+      if (state.user) {
+        action.hidden = false;
+        locked.hidden = true;
+      } else {
+        action.hidden = true;
+        locked.hidden = false;
+      }
     });
   }
 
-  function renderPrayerCards(prayers) {
-    prayers.forEach((p) => {
-      const card = document.querySelector(`.prayer-card[data-prayer="${p.key}"]`);
-      if (!card) return;
-      const timeEl = card.querySelector("[data-time]");
-      if (timeEl) timeEl.textContent = p.time || "—";
+  function renderHeroTimes(times) {
+    if (!els.todayPrayers) return;
+    els.todayPrayers.innerHTML = "";
+    PRAYER_ORDER.forEach((key) => {
+      const li = document.createElement("li");
+      li.className = "prayer-row";
+      const name = document.createElement("span");
+      name.className = "prayer-name";
+      name.textContent = PRAYER_LABELS[key];
+      const time = document.createElement("span");
+      time.className = "prayer-time";
+      time.textContent = (times && times[key]) || "—";
+      li.append(name, time);
+      els.todayPrayers.appendChild(li);
     });
+  }
+
+  function renderGridTimes(times) {
+    document.querySelectorAll(".prayer-card").forEach((card) => {
+      const key = card.dataset.prayer;
+      const timeEl = card.querySelector("[data-time]");
+      if (timeEl) timeEl.textContent = (times && times[key]) || "—";
+    });
+  }
+
+  function renderPrayerStates(prayers) {
+    state.prayers = prayers;
+    const map = new Map((prayers || []).map((p) => [p.prayer, p]));
+
+    let completedCount = 0;
+
+    document.querySelectorAll(".prayer-card").forEach((card) => {
+      const key = card.dataset.prayer;
+      const p = map.get(key);
+      const done = !!(p && p.completed);
+      if (done) completedCount += 1;
+
+      card.classList.toggle("is-done", done);
+
+      const btn = card.querySelector("[data-check]");
+      if (!btn) return;
+      btn.classList.toggle("is-done", done);
+      btn.innerHTML = "";
+      if (done) {
+        btn.appendChild(checkIcon());
+        btn.setAttribute("aria-label", `إلغاء تعليم ${PRAYER_LABELS[key]}`);
+      } else {
+        const span = document.createElement("span");
+        span.className = "check-empty";
+        span.textContent = "—";
+        btn.appendChild(span);
+        btn.setAttribute("aria-label", `تعليم ${PRAYER_LABELS[key]}`);
+      }
+      btn.disabled = state.busy;
+    });
+
+    els.statusCount.textContent = String(completedCount);
   }
 
   function setSourceLabel(source) {
-    const el = document.getElementById("prayer-source");
-    if (!el) return;
-    el.textContent = source ? `المصدر: ${source}` : "المصدر: غير متاح";
+    if (!els.prayerSource) return;
+    els.prayerSource.textContent = source ? `المصدر: ${source}` : "المصدر: غير متاح";
+  }
+
+  function setPushNote(message, variant) {
+    if (!els.pushNote) return;
+    if (message) {
+      els.pushNote.textContent = message;
+      els.pushNote.hidden = false;
+      els.pushNote.classList.toggle("is-error", variant === "error");
+    } else {
+      els.pushNote.hidden = true;
+      els.pushNote.classList.remove("is-error");
+    }
   }
 
   function normalizeApiTimes(data) {
     const t = data.timings || data;
-    return [
-      { key: "fajr",    name: "الفجر",   time: t.Fajr    || t.fajr    },
-      { key: "dhuhr",   name: "الظهر",   time: t.Dhuhr   || t.dhuhr   },
-      { key: "asr",     name: "العصر",   time: t.Asr     || t.asr     },
-      { key: "maghrib", name: "المغرب",  time: t.Maghrib || t.maghrib },
-      { key: "isha",    name: "العشاء",  time: t.Isha    || t.isha    }
-    ];
-  }
-
-  function getUserCoords() {
-    return new Promise((resolve) => {
-      if (!navigator.geolocation) {
-        resolve({ lat: 21.4225, lng: 39.8262 });
-        return;
-      }
-      const timer = setTimeout(() => resolve({ lat: 21.4225, lng: 39.8262 }), 4000);
-      navigator.geolocation.getCurrentPosition(
-        (pos) => {
-          clearTimeout(timer);
-          resolve({ lat: pos.coords.latitude, lng: pos.coords.longitude });
-        },
-        () => {
-          clearTimeout(timer);
-          resolve({ lat: 21.4225, lng: 39.8262 });
-        },
-        { timeout: 3500 }
-      );
-    });
+    return {
+      fajr: t.Fajr || t.fajr,
+      dhuhr: t.Dhuhr || t.dhuhr,
+      asr: t.Asr || t.asr,
+      maghrib: t.Maghrib || t.maghrib,
+      isha: t.Isha || t.isha
+    };
   }
 
   async function loadPrayerTimes() {
-    const today = new Date();
-    const dateEl = document.getElementById("today-date");
-    if (dateEl) dateEl.textContent = formatDateAr(today);
+    const dateEl = els.todayDate;
+    if (dateEl) dateEl.textContent = formatDateAr(new Date());
 
     try {
       const data = await apiFetch("/api/prayers/times");
-      const map = normalizeApiTimes(data);
-      renderPrayerRows(map);
-      renderPrayerCards(map);
+      const times = normalizeApiTimes(data);
+      state.times = times;
+      renderHeroTimes(times);
+      renderGridTimes(times);
       setSourceLabel(data.source || "الخادم");
+    } catch (_) {
+      setSourceLabel(null);
+    }
+  }
+
+  async function loadTodayPrayers() {
+    if (!state.user) {
+      renderPrayerStates([]);
+      return;
+    }
+    try {
+      const data = await apiFetch("/api/prayers/today");
+      renderPrayerStates(data.prayers || []);
     } catch (err) {
-      try {
-        const coords = await getUserCoords();
-        const url = `https://api.aladhan.com/v1/timings?latitude=${coords.lat}&longitude=${coords.lng}&method=4`;
-        const res = await fetch(url);
-        const json = await res.json();
-        const map = normalizeApiTimes(json.data);
-        renderPrayerRows(map);
-        renderPrayerCards(map);
-        setSourceLabel("AlAdhan");
-      } catch (fallbackErr) {
-        setSourceLabel(null);
+      if (err.status === 401) {
+        state.user = null;
+        renderAuthUI();
       }
+    }
+  }
+
+  async function togglePrayer(prayer, completed) {
+    if (state.busy) return;
+    state.busy = true;
+    document.querySelectorAll("[data-check]").forEach((b) => { b.disabled = true; });
+    try {
+      const data = await apiFetch("/api/prayers/complete", {
+        method: "POST",
+        body: JSON.stringify({ prayer, completed })
+      });
+      renderPrayerStates(data.prayers || []);
+      showToast(completed ? "تم تعليم الصلاة كمكتملة" : "تم إلغاء التعليم", "is-success");
+    } catch (err) {
+      if (err.status === 401) {
+        state.user = null;
+        renderAuthUI();
+        showToast("سجّل دخولك أولًا", "is-error");
+      } else {
+        showToast("تعذّر تحديث الصلاة: " + err.message, "is-error");
+      }
+    } finally {
+      state.busy = false;
+      renderPrayerStates(state.prayers || []);
+    }
+  }
+
+  async function resetPrayers() {
+    if (state.busy) return;
+    if (!confirm("هل تريد إعادة كل صلوات اليوم؟")) return;
+    state.busy = true;
+    els.btnReset.disabled = true;
+    try {
+      const data = await apiFetch("/api/prayers/reset", { method: "POST" });
+      renderPrayerStates(data.prayers || []);
+      showToast("تمت إعادة صلوات اليوم", "is-success");
+    } catch (err) {
+      if (err.status === 401) {
+        state.user = null;
+        renderAuthUI();
+      } else {
+        showToast("تعذّرت الإعادة: " + err.message, "is-error");
+      }
+    } finally {
+      state.busy = false;
+      els.btnReset.disabled = false;
+    }
+  }
+
+  async function logout() {
+    try {
+      await fetch("/api/auth/logout", { method: "POST", credentials: "include" });
+    } catch (_) {}
+    state.user = null;
+    state.prayers = null;
+    renderAuthUI();
+    renderPrayerStates([]);
+    showToast("تم تسجيل الخروج", "is-success");
+  }
+
+  async function loadSession() {
+    try {
+      const data = await apiFetch("/api/auth/me");
+      state.user = data.user;
+    } catch (_) {
+      state.user = null;
+    }
+    renderAuthUI();
+  }
+
+  function urlBase64ToUint8Array(base64String) {
+    const padding = "=".repeat((4 - (base64String.length % 4)) % 4);
+    const base64 = (base64String + padding).replace(/-/g, "+").replace(/_/g, "/");
+    const raw = atob(base64);
+    const arr = new Uint8Array(raw.length);
+    for (let i = 0; i < raw.length; i += 1) arr[i] = raw.charCodeAt(i);
+    return arr;
+  }
+
+  async function registerServiceWorker() {
+    if (!("serviceWorker" in navigator)) return null;
+    try {
+      const reg = await navigator.serviceWorker.register("/sw.js", { scope: "/" });
+      return reg;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  async function checkPushSupport() {
+    if (!("serviceWorker" in navigator) || !("PushManager" in window)) {
+      state.pushSupported = false;
+      return;
+    }
+    try {
+      const cfg = await apiFetch("/api/config");
+      state.vapidPublicKey = cfg.vapidPublicKey;
+      state.pushSupported = !!cfg.vapidPublicKey;
+    } catch (_) {
+      state.pushSupported = false;
+    }
+  }
+
+  async function refreshPushButton() {
+    if (!els.btnEnablePush) return;
+    if (!state.pushSupported) {
+      els.btnEnablePush.disabled = true;
+      els.btnEnablePush.textContent = "الإشعارات غير مدعومة";
+      if (state.user) setPushNote("متصفحك لا يدعم الإشعارات.", "error");
+      return;
+    }
+    if (!state.user) {
+      els.btnEnablePush.disabled = true;
+      return;
+    }
+
+    try {
+      const reg = await navigator.serviceWorker.getRegistration();
+      const sub = reg ? await reg.pushManager.getSubscription() : null;
+      if (sub) {
+        state.pushSubscribed = true;
+        els.btnEnablePush.textContent = "الإشعارات مفعّلة";
+        els.btnEnablePush.disabled = true;
+        setPushNote("ستصلك تنبيهات قبل الصلاة بعشر وخمس دقائق وفي وقتها.", null);
+      } else {
+        state.pushSubscribed = false;
+        els.btnEnablePush.textContent = "تفعيل الإشعارات";
+        els.btnEnablePush.disabled = false;
+        setPushNote(null);
+      }
+    } catch (_) {
+      els.btnEnablePush.disabled = false;
+    }
+  }
+
+  async function enablePush() {
+    if (!state.user) {
+      showToast("سجّل دخولك أولًا", "is-error");
+      return;
+    }
+    if (!state.pushSupported) {
+      showToast("متصفحك لا يدعم الإشعارات", "is-error");
+      return;
+    }
+
+    els.btnEnablePush.disabled = true;
+    try {
+      const permission = await Notification.requestPermission();
+      if (permission !== "granted") {
+        setPushNote("الإشعارات معطّلة، فعّلها من إعدادات المتصفح.", "error");
+        els.btnEnablePush.disabled = false;
+        return;
+      }
+
+      const reg = await registerServiceWorker();
+      if (!reg) throw new Error("service worker failed");
+
+      await navigator.serviceWorker.ready;
+
+      let sub = await reg.pushManager.getSubscription();
+      if (!sub) {
+        sub = await reg.pushManager.subscribe({
+          userVisibleOnly: true,
+          applicationServerKey: urlBase64ToUint8Array(state.vapidPublicKey)
+        });
+      }
+
+      await apiFetch("/api/push/subscribe", {
+        method: "POST",
+        body: JSON.stringify({ subscription: sub.toJSON ? sub.toJSON() : sub })
+      });
+
+      state.pushSubscribed = true;
+      els.btnEnablePush.textContent = "الإشعارات مفعّلة";
+      setPushNote("تم تفعيل الإشعارات. ستصلك تنبيهات قبل الصلاة.", null);
+      showToast("تم تفعيل الإشعارات", "is-success");
+    } catch (err) {
+      setPushNote("تعذّر تفعيل الإشعارات. حاول مرة أخرى.", "error");
+      els.btnEnablePush.disabled = false;
     }
   }
 
@@ -173,24 +489,51 @@
       referrer: document.referrer || null
     };
     try {
-      await apiFetch("/api/visits", {
-        method: "POST",
-        body: JSON.stringify(payload)
+      await apiFetch("/api/visits", { method: "POST", body: JSON.stringify(payload) });
+    } catch (_) {}
+  }
+
+  function bindGridEvents() {
+    document.querySelectorAll(".prayer-card").forEach((card) => {
+      const btn = card.querySelector("[data-check]");
+      if (!btn) return;
+      btn.addEventListener("click", () => {
+        if (!state.user) {
+          showToast("سجّل دخولك أولًا", "is-error");
+          return;
+        }
+        const key = card.dataset.prayer;
+        const p = (state.prayers || []).find((x) => x.prayer === key);
+        const currentlyDone = !!(p && p.completed);
+        togglePrayer(key, !currentlyDone);
       });
-    } catch (err) {
-      console.warn("تعذّر تسجيل الزيارة:", err.message);
-    }
+    });
+  }
+
+  function bindEvents() {
+    if (els.navLogout) els.navLogout.addEventListener("click", logout);
+    if (els.btnReset) els.btnReset.addEventListener("click", resetPrayers);
+    if (els.btnEnablePush) els.btnEnablePush.addEventListener("click", enablePush);
   }
 
   function initYear() {
-    const el = document.getElementById("year");
-    if (el) el.textContent = String(new Date().getFullYear());
+    if (els.year) els.year.textContent = String(new Date().getFullYear());
   }
 
-  function init() {
+  async function init() {
+    cacheEls();
     initNav();
     initYear();
-    loadPrayerTimes();
+    bindEvents();
+    bindGridEvents();
+
+    registerServiceWorker();
+    await checkPushSupport();
+    await loadSession();
+    await loadPrayerTimes();
+    await loadTodayPrayers();
+    await refreshPushButton();
+
     trackVisit();
   }
 
