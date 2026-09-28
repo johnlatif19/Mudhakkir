@@ -55,8 +55,8 @@
       setFieldError(els.username, els.usernameError, "");
     }
 
-    if (password.length < 4) {
-      setFieldError(els.password, els.passwordError, "كلمة المرور يجب ألا تقل عن 4 أحرف.");
+    if (password.length < 6) {
+      setFieldError(els.password, els.passwordError, "كلمة المرور يجب ألا تقل عن 6 أحرف.");
       ok = false;
     } else {
       setFieldError(els.password, els.passwordError, "");
@@ -113,8 +113,12 @@
       const res = await fetch("/api/auth/me", { credentials: "include" });
       if (res.ok) {
         const data = await res.json();
-        if (data && data.user && data.user.role === "admin") {
-          location.replace("/dashboard");
+        if (data && data.user) {
+          if (data.user.role === "admin") {
+            location.replace("/dashboard");
+          } else {
+            location.replace("/");
+          }
         }
       }
     } catch (_) {}
