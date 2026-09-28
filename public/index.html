@@ -36,8 +36,8 @@
           <li><a href="/chat">المحادثة</a></li>
         </ul>
         <div class="nav-auth" id="nav-auth">
-          <a href="/login" class="btn btn-ghost btn-sm" data-when="guest">دخول</a>
-          <a href="/sign-up" class="btn btn-primary btn-sm" data-when="guest">إنشاء حساب</a>
+          <a href="/login" class="btn btn-ghost btn-sm" data-when="guest" hidden>دخول</a>
+          <a href="/sign-up" class="btn btn-primary btn-sm" data-when="guest" hidden>إنشاء حساب</a>
           <span class="nav-user" data-when="user" hidden>
             <span class="nav-user-name" id="nav-user-name">—</span>
             <button type="button" class="btn btn-ghost btn-sm" id="nav-logout">خروج</button>
@@ -60,7 +60,7 @@
           </p>
           <div class="hero-actions">
             <a href="/chat" class="btn btn-primary">افتح المحادثة</a>
-            <a href="/sign-up" class="btn btn-ghost" id="hero-cta-signup">أنشئ حساب</a>
+            <a href="/sign-up" class="btn btn-ghost" id="hero-cta-signup" hidden>أنشئ حساب</a>
           </div>
           <p class="hero-note">
             تُحدَّث المواقيت تلقائيًا حسب موقعك، وتُحفظ بياناتك على الخادم.
