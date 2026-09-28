@@ -146,7 +146,7 @@ button { font: inherit; cursor: pointer; }
 
 .stats {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(5, minmax(0, 1fr));
   gap: 16px;
 }
 
@@ -166,7 +166,7 @@ button { font: inherit; cursor: pointer; }
 
 .stat-value {
   margin: 0;
-  font-size: 28px;
+  font-size: 26px;
   font-weight: 700;
   font-variant-numeric: tabular-nums;
 }
@@ -192,74 +192,70 @@ button { font: inherit; cursor: pointer; }
   font-size: 18px;
 }
 
-.prayer-table {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  border-top: 1px solid var(--border);
+.table-wrap {
+  overflow-x: auto;
+  margin: 0 -4px;
 }
 
-.prayer-table-row {
-  display: grid;
-  grid-template-columns: 1.4fr 1fr 1fr auto;
-  align-items: center;
-  gap: 12px;
-  padding: 14px 4px;
+.users-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 14px;
+  min-width: 640px;
+}
+
+.users-table th,
+.users-table td {
+  text-align: right;
+  padding: 12px 10px;
   border-bottom: 1px solid var(--border);
+  white-space: nowrap;
 }
 
-.prayer-table-row.is-loading {
-  display: block;
-  text-align: center;
-  color: var(--text-muted);
-  padding: 20px 0;
-}
-
-.prayer-name { font-weight: 600; }
-.prayer-time { font-variant-numeric: tabular-nums; color: var(--text-muted); }
-
-.prayer-state {
-  font-size: 13px;
+.users-table th {
   font-weight: 600;
+  color: var(--text-muted);
+  font-size: 13px;
+  background: var(--surface-alt);
 }
 
-.prayer-state.is-done { color: var(--primary); }
-.prayer-state.is-missing { color: var(--text-muted); }
+.users-table th:first-child { border-top-right-radius: var(--radius-sm); }
+.users-table th:last-child { border-top-left-radius: var(--radius-sm); }
 
-.prayer-check {
+.users-table tbody tr:hover { background: #fafbfc; }
+
+.users-table .cell-name { font-weight: 600; }
+
+.users-table .cell-count { font-variant-numeric: tabular-nums; }
+
+.mark {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 36px;
-  height: 36px;
+  width: 26px;
+  height: 26px;
   border-radius: 50%;
   border: 1px solid var(--border);
-  background: var(--surface);
   color: var(--text-muted);
-  transition: background-color .15s ease, border-color .15s ease, color .15s ease;
+  font-size: 13px;
 }
 
-.prayer-check:hover:not(:disabled),
-.prayer-check:focus-visible:not(:disabled) {
-  border-color: var(--primary);
-  color: var(--primary);
-  outline: none;
-}
-
-.prayer-check.is-done {
+.mark.is-done {
   background: var(--primary);
   border-color: var(--primary);
   color: #fff;
 }
 
-.prayer-check:disabled {
-  opacity: 0.6;
-  cursor: not-allowed;
+.mark svg {
+  width: 14px;
+  height: 14px;
 }
 
-.prayer-check svg {
-  width: 18px;
-  height: 18px;
+.table-loading,
+.table-empty {
+  text-align: center;
+  color: var(--text-muted);
+  padding: 24px 10px;
 }
 
 .visits-list {
@@ -298,19 +294,5 @@ button { font: inherit; cursor: pointer; }
   .stats { grid-template-columns: 1fr 1fr; gap: 12px; }
   .stat-value { font-size: 22px; }
   .brand-text { display: none; }
-
-  .prayer-table-row {
-    grid-template-columns: 1fr auto;
-    grid-template-areas:
-      "name check"
-      "time state";
-    row-gap: 4px;
-  }
-
-  .prayer-table-row .prayer-name { grid-area: name; }
-  .prayer-table-row .prayer-time { grid-area: time; }
-  .prayer-table-row .prayer-state { grid-area: state; text-align: left; }
-  .prayer-table-row .prayer-check { grid-area: check; }
-
   .visits-list li { grid-template-columns: 1fr; gap: 2px; }
 }
