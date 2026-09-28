@@ -185,12 +185,21 @@ button { font: inherit; cursor: pointer; }
 
 .btn-primary {
   background: var(--primary);
-  color: #fff;
+  color: #ffffff !important;
+  border-color: var(--primary);
 }
 .btn-primary:hover,
-.btn-primary:focus-visible { background: var(--primary-hover); outline: none; }
-.btn-primary:disabled { opacity: 0.55; cursor: not-allowed; }
-
+.btn-primary:focus-visible {
+  background: var(--primary-hover);
+  border-color: var(--primary-hover);
+  color: #ffffff !important;
+  outline: none;
+}
+.btn-primary:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+  color: #ffffff !important;
+}
 .btn-ghost {
   background: var(--surface);
   color: var(--text);
