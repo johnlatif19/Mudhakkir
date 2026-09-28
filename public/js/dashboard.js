@@ -4,20 +4,10 @@
   const API = "/api";
   const POLL_INTERVAL = 5000;
 
-  const PRAYER_LABELS = {
-    fajr: "الفجر",
-    dhuhr: "الظهر",
-    asr: "العصر",
-    maghrib: "المغرب",
-    isha: "العشاء"
-  };
-
-  const PRAYER_ORDER = ["fajr", "dhuhr", "asr", "maghrib", "isha"];
+  const PRAYER_KEYS = ["fajr", "dhuhr", "asr", "maghrib", "isha"];
 
   const state = {
-    pollTimer: null,
-    prayers: [],
-    busy: false
+    pollTimer: null
   };
 
   const els = {};
@@ -26,9 +16,10 @@
     els.totalVisitors = document.getElementById("stat-total-visitors");
     els.todayVisitors = document.getElementById("stat-today-visitors");
     els.weekVisitors = document.getElementById("stat-week-visitors");
+    els.totalUsers = document.getElementById("stat-total-users");
     els.completedPrayers = document.getElementById("stat-completed-prayers");
-    els.prayerTable = document.getElementById("prayer-table");
-    els.prayersDate = document.getElementById("prayers-date");
+    els.usersTbody = document.getElementById("users-tbody");
+    els.usersDate = document.getElementById("users-date");
     els.visitsList = document.getElementById("visits-list");
     els.logout = document.getElementById("logout-btn");
   }
@@ -40,8 +31,12 @@
       ...options
     });
     if (res.status === 401) {
-      location.replace("/login?next=/dashboard");
+      location.replace("/login-admin");
       throw new Error("unauthorized");
+    }
+    if (res.status === 403) {
+      location.replace("/");
+      throw new Error("forbidden");
     }
     if (!res.ok) {
       let message = `HTTP ${res.status}`;
@@ -85,7 +80,7 @@
     svg.setAttribute("viewBox", "0 0 24 24");
     svg.setAttribute("fill", "none");
     svg.setAttribute("stroke", "currentColor");
-    svg.setAttribute("stroke-width", "2.4");
+    svg.setAttribute("stroke-width", "2.6");
     svg.setAttribute("stroke-linecap", "round");
     svg.setAttribute("stroke-linejoin", "round");
     const p = document.createElementNS("http://www.w3.org/2000/svg", "path");
@@ -98,59 +93,51 @@
     els.totalVisitors.textContent = String(stats.totalVisitors ?? 0);
     els.todayVisitors.textContent = String(stats.todayVisitors ?? 0);
     els.weekVisitors.textContent = String(stats.weekVisitors ?? 0);
+    els.totalUsers.textContent = String(stats.totalUsers ?? 0);
     els.completedPrayers.textContent = String(stats.completedPrayersToday ?? 0);
   }
 
-  function renderPrayers(prayers, date) {
-    state.prayers = prayers;
-    els.prayersDate.textContent = date ? formatDateAr(new Date(date)) : formatDateAr(new Date());
-    els.prayerTable.innerHTML = "";
+  function renderUsers(users, date) {
+    els.usersDate.textContent = date ? formatDateAr(new Date(date)) : formatDateAr(new Date());
+    els.usersTbody.innerHTML = "";
 
-    PRAYER_ORDER.forEach((key) => {
-      const p = prayers.find((x) => x.prayer === key) || {
-        prayer: key,
-        time: "—",
-        completed: false,
-        completedAt: null
-      };
-      els.prayerTable.appendChild(buildPrayerRow(p));
-    });
-  }
-
-  function buildPrayerRow(p) {
-    const li = document.createElement("li");
-    li.className = "prayer-table-row";
-
-    const name = document.createElement("span");
-    name.className = "prayer-name";
-    name.textContent = PRAYER_LABELS[p.prayer] || p.prayer;
-
-    const time = document.createElement("span");
-    time.className = "prayer-time";
-    time.textContent = p.time || "—";
-
-    const stateEl = document.createElement("span");
-    stateEl.className = "prayer-state " + (p.completed ? "is-done" : "is-missing");
-    stateEl.textContent = p.completed
-      ? `مكتملة ${p.completedAt ? "• " + formatTime(p.completedAt) : ""}`
-      : "غير مكتملة";
-
-    const btn = document.createElement("button");
-    btn.type = "button";
-    btn.className = "prayer-check" + (p.completed ? " is-done" : "");
-    btn.setAttribute("aria-label", p.completed ? "إلغاء إكمال الصلاة" : "تعليم الصلاة كمكتملة");
-    btn.disabled = state.busy;
-    if (p.completed) btn.appendChild(checkIcon());
-    else {
-      const dash = document.createElement("span");
-      dash.textContent = "—";
-      btn.appendChild(dash);
+    if (!users.length) {
+      const tr = document.createElement("tr");
+      const td = document.createElement("td");
+      td.colSpan = 7;
+      td.className = "table-empty";
+      td.textContent = "لا يوجد مستخدمون مسجّلون بعد.";
+      tr.appendChild(td);
+      els.usersTbody.appendChild(tr);
+      return;
     }
 
-    btn.addEventListener("click", () => togglePrayer(p.prayer, !p.completed));
+    users.forEach((u) => {
+      const tr = document.createElement("tr");
 
-    li.append(name, time, stateEl, btn);
-    return li;
+      const nameTd = document.createElement("td");
+      nameTd.className = "cell-name";
+      nameTd.textContent = u.name;
+      tr.appendChild(nameTd);
+
+      PRAYER_KEYS.forEach((key) => {
+        const td = document.createElement("td");
+        const mark = document.createElement("span");
+        const done = !!u.prayers[key];
+        mark.className = "mark" + (done ? " is-done" : "");
+        if (done) mark.appendChild(checkIcon());
+        else mark.textContent = "—";
+        td.appendChild(mark);
+        tr.appendChild(td);
+      });
+
+      const countTd = document.createElement("td");
+      countTd.className = "cell-count";
+      countTd.textContent = `${u.completedCount} / ${PRAYER_KEYS.length}`;
+      tr.appendChild(countTd);
+
+      els.usersTbody.appendChild(tr);
+    });
   }
 
   function renderVisits(visits) {
@@ -163,6 +150,7 @@
     }
     visits.forEach((v) => {
       const li = document.createElement("li");
+
       const page = document.createElement("span");
       page.className = "visit-page";
       page.textContent = v.page || "/";
@@ -185,38 +173,14 @@
     renderStats(data.stats || {});
   }
 
-  async function loadPrayers() {
-    const data = await apiFetch(`${API}/prayers/today`);
-    renderPrayers(data.prayers || [], data.date);
+  async function loadUsers() {
+    const data = await apiFetch(`${API}/dashboard/users`);
+    renderUsers(data.users || [], data.date);
   }
 
   async function loadVisits() {
     const data = await apiFetch(`${API}/dashboard/visits?limit=10`);
     renderVisits(data.visits || []);
-  }
-
-  async function togglePrayer(prayer, completed) {
-    if (state.busy) return;
-    state.busy = true;
-    renderPrayers(state.prayers);
-    try {
-      const data = await apiFetch(`${API}/prayers/complete`, {
-        method: "POST",
-        body: JSON.stringify({ prayer, completed })
-      });
-      if (data && data.prayers) {
-        renderPrayers(data.prayers, data.date);
-      } else {
-        await loadPrayers();
-      }
-      await loadStats();
-    } catch (err) {
-      alert("تعذّر تحديث حالة الصلاة: " + err.message);
-      await loadPrayers();
-    } finally {
-      state.busy = false;
-      renderPrayers(state.prayers);
-    }
   }
 
   async function logout() {
@@ -226,14 +190,14 @@
         credentials: "include"
       });
     } catch (_) {}
-    location.replace("/login");
+    location.replace("/login-admin");
   }
 
   async function refreshAll() {
     try {
-      await Promise.all([loadStats(), loadPrayers(), loadVisits()]);
+      await Promise.all([loadStats(), loadUsers(), loadVisits()]);
     } catch (err) {
-      if (err.message !== "unauthorized") {
+      if (err.message !== "unauthorized" && err.message !== "forbidden") {
         console.warn("تعذّر تحديث اللوحة:", err.message);
       }
     }
